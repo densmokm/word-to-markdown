@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Word to Markdown</title>
+  <meta name="description" content="Convert DOCX Word documents to Markdown locally in your browser." />
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://unpkg.com/mammoth@1.8.0/mammoth.browser.min.js"></script>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Browser-only utility</p>
+        <h1>Word to Markdown</h1>
+        <p class="lede">
+          Drop in a <code>.docx</code> file and convert it to Markdown without uploading the document anywhere.
+          Your file stays in your browser.
+        </p>
+      </div>
+      <div class="badge">DOCX → MD</div>
+    </section>
+
+    <section class="card upload-card">
+      <label class="drop-zone" id="dropZone" for="fileInput">
+        <input id="fileInput" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+        <span class="drop-title">Drop a Word document here</span>
+        <span class="drop-subtitle">or click to choose a <code>.docx</code> file</span>
+      </label>
+
+      <div class="toolbar">
+        <button id="convertButton" class="primary" disabled>Convert to Markdown</button>
+        <button id="downloadButton" disabled>Download .md</button>
+        <button id="copyButton" disabled>Copy Markdown</button>
+        <button id="clearButton" disabled>Clear</button>
+      </div>
+
+      <div id="status" class="status" aria-live="polite">Choose a Word document to begin.</div>
+    </section>
+
+    <section class="grid">
+      <article class="card">
+        <div class="panel-heading">
+          <h2>Markdown output</h2>
+          <span id="wordCount" class="muted">0 characters</span>
+        </div>
+        <textarea id="markdownOutput" spellcheck="false" placeholder="Your Markdown will appear here..."></textarea>
+      </article>
+
+      <article class="card">
+        <div class="panel-heading">
+          <h2>Preview</h2>
+          <span class="muted">Basic rendered view</span>
+        </div>
+        <div id="preview" class="preview empty">Nothing to preview yet.</div>
+      </article>
+    </section>
+
+    <section class="card notes">
+      <h2>What it handles</h2>
+      <p>
+        Headings, paragraphs, bold text, italics, links, lists, tables and common document structure.
+        Complex Word layouts may need a quick tidy after conversion.
+      </p>
+      <p>
+        This static utility runs entirely in your browser, making it suitable for GitHub Pages.
+      </p>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
