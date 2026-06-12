@@ -127,7 +127,11 @@ function convertNode(node, depth) {
   const tag = node.tagName.toLowerCase();
   const content = () => Array.from(node.childNodes).map(child => convertNode(child, depth)).join("");
   if (/^h[1-6]$/.test(tag)) return `${"#".repeat(Number(tag[1]))} ${inlineContent(node)}`;
-  if (tag === "p") return inlineContent(node);
+  if (tag === "p") {
+    const text = plainText(node);
+    return looksLikeCode(text) ? fencedCodeBlock(text) : inlineContent(node);
+  }
+  if (tag === "pre") return fencedCodeBlock(node.textContent || "");
   if (tag === "strong" || tag === "b") return `**${content()}**`;
   if (tag === "em" || tag === "i") return `*${content()}*`;
   if (tag === "u") return content();
@@ -175,6 +179,8 @@ function convertTable(table) {
 }
 
 function tableCellContent(cell) {
+  const text = plainText(cell);
+  if (looksLikeCode(text)) return `<pre><code>${escapeHtml(text)}</code></pre>`;
   return Array.from(cell.childNodes)
     .map(node => convertNode(node, 0))
     .join(" ")
@@ -192,8 +198,29 @@ function inlineContent(node) {
     .trim();
 }
 
+function plainText(node) {
+  return (node.textContent || "").replace(/\u00a0/g, " ").trim();
+}
+
 function cleanText(value) {
   return value.replace(/\u00a0/g, " ").replace(/\s+/g, " ");
+}
+
+function looksLikeCode(value) {
+  const text = value.trim();
+  if (!text) return false;
+  const sqlKeywords = /\b(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|FROM|WHERE|JOIN|RETURNS|LANGUAGE|DECLARE|BEGIN|END|EXCEPTION|PERFORM|RAISE|COALESCE|TIMESTAMP|UUID|FUNCTION)\b/i;
+  const codeSignals = /(--|;|\$\$|:=|\bINTO\b|\bNULL\b|\bCOUNT\s*\()/i;
+  return text.length > 80 && sqlKeywords.test(text) && codeSignals.test(text);
+}
+
+function fencedCodeBlock(value) {
+  const code = value.replace(/\u00a0/g, " ").trim();
+  return `\`\`\`sql\n${code}\n\`\`\``;
+}
+
+function escapeHtml(value) {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function escapeMarkdown(value) {
