@@ -11,6 +11,7 @@ const wordCount = document.getElementById("wordCount");
 
 let selectedFile = null;
 let generatedMarkdown = "";
+let generatedHtml = "";
 
 function setStatus(message) {
   status.textContent = message;
@@ -53,14 +54,15 @@ convertButton.addEventListener("click", async () => {
     setStatus("Converting document locally in your browser...");
     const arrayBuffer = await selectedFile.arrayBuffer();
     const result = await mammoth.convertToHtml({ arrayBuffer });
-    generatedMarkdown = htmlToMarkdown(result.value).trim() + "\n";
+    generatedHtml = enhanceHtmlForConfluence(result.value);
+    generatedMarkdown = htmlToMarkdown(generatedHtml).trim() + "\n";
     markdownOutput.value = generatedMarkdown;
-    preview.innerHTML = result.value || "Nothing to preview yet.";
+    preview.innerHTML = generatedHtml || "Nothing to preview yet.";
     preview.classList.remove("empty");
     downloadButton.disabled = false;
     copyButton.disabled = false;
     wordCount.textContent = `${generatedMarkdown.length.toLocaleString()} characters`;
-    setStatus(result.messages.length ? `Converted with ${result.messages.length} note(s). Review complex merged cells.` : "Converted successfully. Your document never left this browser.");
+    setStatus(result.messages.length ? `Converted with ${result.messages.length} note(s). Review complex merged cells.` : "Converted successfully. Use Copy output to paste rich text into Confluence.");
   } catch (error) {
     console.error(error);
     setStatus("Conversion failed. Check that the file is a valid .docx document.");
@@ -90,17 +92,29 @@ downloadButton.addEventListener("click", () => {
 copyButton.addEventListener("click", async () => {
   if (!generatedMarkdown) return;
   try {
+    if (navigator.clipboard && window.ClipboardItem && generatedHtml) {
+      const htmlBlob = new Blob([generatedHtml], { type: "text/html" });
+      const textBlob = new Blob([generatedMarkdown], { type: "text/plain" });
+      await navigator.clipboard.write([new ClipboardItem({
+        "text/html": htmlBlob,
+        "text/plain": textBlob
+      })]);
+      setStatus("Rich text copied. Paste into Confluence to preserve tables and code blocks.");
+      return;
+    }
     await navigator.clipboard.writeText(generatedMarkdown);
+    setStatus("Markdown copied to your clipboard.");
   } catch {
     markdownOutput.select();
     document.execCommand("copy");
+    setStatus("Markdown copied to your clipboard.");
   }
-  setStatus("Markdown copied to your clipboard.");
 });
 
 clearButton.addEventListener("click", () => {
   selectedFile = null;
   generatedMarkdown = "";
+  generatedHtml = "";
   fileInput.value = "";
   markdownOutput.value = "";
   preview.textContent = "Nothing to preview yet.";
@@ -112,6 +126,21 @@ clearButton.addEventListener("click", () => {
   wordCount.textContent = "0 characters";
   setStatus("Choose a Word document to begin.");
 });
+
+function enhanceHtmlForConfluence(html) {
+  const documentFragment = new DOMParser().parseFromString(html, "text/html");
+  Array.from(documentFragment.body.querySelectorAll("p")).forEach(paragraph => {
+    const text = plainText(paragraph);
+    if (!looksLikeCode(text)) return;
+    const pre = documentFragment.createElement("pre");
+    const code = documentFragment.createElement("code");
+    code.className = "language-sql";
+    code.textContent = formatSql(text);
+    pre.appendChild(code);
+    paragraph.replaceWith(pre);
+  });
+  return documentFragment.body.innerHTML;
+}
 
 function htmlToMarkdown(html) {
   const documentFragment = new DOMParser().parseFromString(html, "text/html");
@@ -127,10 +156,7 @@ function convertNode(node, depth) {
   const tag = node.tagName.toLowerCase();
   const content = () => Array.from(node.childNodes).map(child => convertNode(child, depth)).join("");
   if (/^h[1-6]$/.test(tag)) return `${"#".repeat(Number(tag[1]))} ${inlineContent(node)}`;
-  if (tag === "p") {
-    const text = plainText(node);
-    return looksLikeCode(text) ? fencedCodeBlock(text) : inlineContent(node);
-  }
+  if (tag === "p") return inlineContent(node);
   if (tag === "pre") return fencedCodeBlock(node.textContent || "");
   if (tag === "strong" || tag === "b") return `**${content()}**`;
   if (tag === "em" || tag === "i") return `*${content()}*`;
@@ -179,8 +205,6 @@ function convertTable(table) {
 }
 
 function tableCellContent(cell) {
-  const text = plainText(cell);
-  if (looksLikeCode(text)) return `<pre><code>${escapeHtml(text)}</code></pre>`;
   return Array.from(cell.childNodes)
     .map(node => convertNode(node, 0))
     .join(" ")
@@ -214,13 +238,18 @@ function looksLikeCode(value) {
   return text.length > 80 && sqlKeywords.test(text) && codeSignals.test(text);
 }
 
-function fencedCodeBlock(value) {
-  const code = value.replace(/\u00a0/g, " ").trim();
-  return `\`\`\`sql\n${code}\n\`\`\``;
+function formatSql(value) {
+  return value
+    .replace(/\u00a0/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/\s+(--\s*)/g, "\n$1")
+    .replace(/;\s+/g, ";\n")
+    .replace(/\b(BEGIN|DECLARE|EXCEPTION|END;)\b/gi, "\n$1\n")
+    .trim();
 }
 
-function escapeHtml(value) {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+function fencedCodeBlock(value) {
+  return `\`\`\`sql\n${value.trim()}\n\`\`\``;
 }
 
 function escapeMarkdown(value) {
