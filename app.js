@@ -10,7 +10,7 @@ const status = document.getElementById("status");
 const wordCount = document.getElementById("wordCount");
 
 let selectedFile = null;
-let generatedMarkup = "";
+let generatedMarkdown = "";
 
 function setStatus(message) {
   status.textContent = message;
@@ -53,13 +53,13 @@ convertButton.addEventListener("click", async () => {
     setStatus("Converting document locally in your browser...");
     const arrayBuffer = await selectedFile.arrayBuffer();
     const result = await mammoth.convertToHtml({ arrayBuffer });
-    generatedMarkup = htmlToConfluence(result.value).trim() + "\n";
-    markdownOutput.value = generatedMarkup;
+    generatedMarkdown = htmlToMarkdown(result.value).trim() + "\n";
+    markdownOutput.value = generatedMarkdown;
     preview.innerHTML = result.value || "Nothing to preview yet.";
     preview.classList.remove("empty");
     downloadButton.disabled = false;
     copyButton.disabled = false;
-    wordCount.textContent = `${generatedMarkup.length.toLocaleString()} characters`;
+    wordCount.textContent = `${generatedMarkdown.length.toLocaleString()} characters`;
     setStatus(result.messages.length ? `Converted with ${result.messages.length} note(s). Review complex merged cells.` : "Converted successfully. Your document never left this browser.");
   } catch (error) {
     console.error(error);
@@ -70,37 +70,37 @@ convertButton.addEventListener("click", async () => {
 });
 
 markdownOutput.addEventListener("input", () => {
-  generatedMarkup = markdownOutput.value;
-  wordCount.textContent = `${generatedMarkup.length.toLocaleString()} characters`;
-  downloadButton.disabled = !generatedMarkup.trim();
-  copyButton.disabled = !generatedMarkup.trim();
+  generatedMarkdown = markdownOutput.value;
+  wordCount.textContent = `${generatedMarkdown.length.toLocaleString()} characters`;
+  downloadButton.disabled = !generatedMarkdown.trim();
+  copyButton.disabled = !generatedMarkdown.trim();
 });
 
 downloadButton.addEventListener("click", () => {
-  if (!generatedMarkup) return;
-  const blob = new Blob([generatedMarkup], { type: "text/plain;charset=utf-8" });
+  if (!generatedMarkdown) return;
+  const blob = new Blob([generatedMarkdown], { type: "text/markdown;charset=utf-8" });
   const link = document.createElement("a");
   const baseName = selectedFile ? selectedFile.name.replace(/\.docx$/i, "") : "converted-document";
   link.href = URL.createObjectURL(blob);
-  link.download = `${baseName}-confluence-wiki.txt`;
+  link.download = `${baseName}.md`;
   link.click();
   URL.revokeObjectURL(link.href);
 });
 
 copyButton.addEventListener("click", async () => {
-  if (!generatedMarkup) return;
+  if (!generatedMarkdown) return;
   try {
-    await navigator.clipboard.writeText(generatedMarkup);
+    await navigator.clipboard.writeText(generatedMarkdown);
   } catch {
     markdownOutput.select();
     document.execCommand("copy");
   }
-  setStatus("Confluence wiki markup copied to your clipboard.");
+  setStatus("Markdown copied to your clipboard.");
 });
 
 clearButton.addEventListener("click", () => {
   selectedFile = null;
-  generatedMarkup = "";
+  generatedMarkdown = "";
   fileInput.value = "";
   markdownOutput.value = "";
   preview.textContent = "Nothing to preview yet.";
@@ -113,9 +113,12 @@ clearButton.addEventListener("click", () => {
   setStatus("Choose a Word document to begin.");
 });
 
-function htmlToConfluence(html) {
+function htmlToMarkdown(html) {
   const documentFragment = new DOMParser().parseFromString(html, "text/html");
-  return Array.from(documentFragment.body.childNodes).map(node => convertNode(node, 0)).join("\n\n").replace(/\n{3,}/g, "\n\n");
+  return Array.from(documentFragment.body.childNodes)
+    .map(node => convertNode(node, 0))
+    .join("\n\n")
+    .replace(/\n{3,}/g, "\n\n");
 }
 
 function convertNode(node, depth) {
@@ -123,54 +126,76 @@ function convertNode(node, depth) {
   if (node.nodeType !== Node.ELEMENT_NODE) return "";
   const tag = node.tagName.toLowerCase();
   const content = () => Array.from(node.childNodes).map(child => convertNode(child, depth)).join("");
-  if (/^h[1-6]$/.test(tag)) return `${tag}. ${inlineContent(node)}`;
+  if (/^h[1-6]$/.test(tag)) return `${"#".repeat(Number(tag[1]))} ${inlineContent(node)}`;
   if (tag === "p") return inlineContent(node);
-  if (tag === "strong" || tag === "b") return `*${content()}*`;
-  if (tag === "em" || tag === "i") return `_${content()}_`;
-  if (tag === "u") return `+${content()}+`;
-  if (tag === "code") return `{{${content()}}}`;
-  if (tag === "br") return "\\\\";
-  if (tag === "a") return `[${inlineContent(node)}|${node.getAttribute("href") || ""}]`;
+  if (tag === "strong" || tag === "b") return `**${content()}**`;
+  if (tag === "em" || tag === "i") return `*${content()}*`;
+  if (tag === "u") return content();
+  if (tag === "code") return `\`${content()}\``;
+  if (tag === "br") return "<br>";
+  if (tag === "a") return `[${inlineContent(node)}](${node.getAttribute("href") || ""})`;
   if (tag === "ul" || tag === "ol") return convertList(node, depth + 1, tag === "ol");
   if (tag === "table") return convertTable(node);
-  if (tag === "img") return node.getAttribute("alt") ? `[Image: ${node.getAttribute("alt")}]` : "[Image]";
-  if (tag === "blockquote") return `{quote}\n${content()}\n{quote}`;
+  if (tag === "img") return node.getAttribute("alt") ? `![${escapeMarkdown(node.getAttribute("alt"))}]()` : "![Image]()";
+  if (tag === "blockquote") return content().split("\n").map(line => `> ${line}`).join("\n");
   return content();
 }
 
 function convertList(list, depth, ordered) {
-  const marker = ordered ? "#" : "*";
-  return Array.from(list.children).filter(child => child.tagName.toLowerCase() === "li").map(item => {
-    const direct = Array.from(item.childNodes).filter(node => !(node.nodeType === Node.ELEMENT_NODE && ["ul", "ol"].includes(node.tagName.toLowerCase()))).map(node => convertNode(node, depth)).join("");
-    const nested = Array.from(item.children).filter(child => ["ul", "ol"].includes(child.tagName.toLowerCase())).map(child => "\n" + convertList(child, depth + 1, child.tagName.toLowerCase() === "ol")).join("");
-    return `${marker.repeat(depth)} ${direct.trim()}${nested}`;
-  }).join("\n");
+  return Array.from(list.children)
+    .filter(child => child.tagName.toLowerCase() === "li")
+    .map((item, index) => {
+      const marker = ordered ? `${index + 1}.` : "-";
+      const indent = "  ".repeat(Math.max(0, depth - 1));
+      const direct = Array.from(item.childNodes)
+        .filter(node => !(node.nodeType === Node.ELEMENT_NODE && ["ul", "ol"].includes(node.tagName.toLowerCase())))
+        .map(node => convertNode(node, depth))
+        .join("")
+        .trim();
+      const nested = Array.from(item.children)
+        .filter(child => ["ul", "ol"].includes(child.tagName.toLowerCase()))
+        .map(child => "\n" + convertList(child, depth + 1, child.tagName.toLowerCase() === "ol"))
+        .join("");
+      return `${indent}${marker} ${direct}${nested}`;
+    })
+    .join("\n");
 }
 
 function convertTable(table) {
   const rows = Array.from(table.rows);
   if (!rows.length) return "";
-  return rows.map((row, index) => {
-    const cells = Array.from(row.cells);
-    const isHeader = cells.every(cell => cell.tagName.toLowerCase() === "th") || (index === 0 && cells.some(cell => cell.tagName.toLowerCase() === "th"));
-    const separator = isHeader ? "||" : "|";
-    const values = cells.map(cell => tableCellContent(cell));
-    return `${separator}${values.join(separator)}${separator}`;
-  }).join("\n");
+  const matrix = rows.map(row => Array.from(row.cells).map(cell => tableCellContent(cell)));
+  const columnCount = Math.max(...matrix.map(row => row.length));
+  const normalisedRows = matrix.map(row => [...row, ...Array(columnCount - row.length).fill("")]);
+  const header = normalisedRows[0];
+  const separator = Array(columnCount).fill("---");
+  return [header, separator, ...normalisedRows.slice(1)]
+    .map(row => `| ${row.join(" | ")} |`)
+    .join("\n");
 }
 
 function tableCellContent(cell) {
-  return Array.from(cell.childNodes).map(node => convertNode(node, 0)).join(" ")
-    .replace(/\n+/g, "\\\\")
+  return Array.from(cell.childNodes)
+    .map(node => convertNode(node, 0))
+    .join(" ")
+    .replace(/\n+/g, "<br>")
     .replace(/\|/g, "\\|")
     .replace(/\s+/g, " ")
     .trim();
 }
 
 function inlineContent(node) {
-  return Array.from(node.childNodes).map(child => convertNode(child, 0)).join("").replace(/\s+/g, " ").trim();
+  return Array.from(node.childNodes)
+    .map(child => convertNode(child, 0))
+    .join("")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function cleanText(value) {
   return value.replace(/\u00a0/g, " ").replace(/\s+/g, " ");
+}
+
+function escapeMarkdown(value) {
+  return value.replace(/[\\`*_{}\[\]()#+\-.!|]/g, "\\$&");
 }
