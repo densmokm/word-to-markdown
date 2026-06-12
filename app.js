@@ -132,12 +132,22 @@ function enhanceHtmlForConfluence(html) {
   Array.from(documentFragment.body.querySelectorAll("p")).forEach(paragraph => {
     const text = plainText(paragraph);
     if (!looksLikeCode(text)) return;
+    const wrapper = documentFragment.createElement("div");
+    wrapper.setAttribute("data-code-language", "sql");
+    wrapper.className = "code-block sql-code-block";
+    const label = documentFragment.createElement("div");
+    label.className = "code-language-label";
+    label.textContent = "SQL";
     const pre = documentFragment.createElement("pre");
+    pre.setAttribute("data-language", "sql");
     const code = documentFragment.createElement("code");
     code.className = "language-sql";
+    code.setAttribute("data-language", "sql");
     code.textContent = formatSql(text);
     pre.appendChild(code);
-    paragraph.replaceWith(pre);
+    wrapper.appendChild(label);
+    wrapper.appendChild(pre);
+    paragraph.replaceWith(wrapper);
   });
   return documentFragment.body.innerHTML;
 }
@@ -168,6 +178,10 @@ function convertNode(node, depth) {
   if (tag === "table") return convertTable(node);
   if (tag === "img") return node.getAttribute("alt") ? `![${escapeMarkdown(node.getAttribute("alt"))}]()` : "![Image]()";
   if (tag === "blockquote") return content().split("\n").map(line => `> ${line}`).join("\n");
+  if (tag === "div" && node.matches(".code-block")) {
+    const pre = node.querySelector("pre");
+    return fencedCodeBlock(pre ? pre.textContent : node.textContent || "");
+  }
   return content();
 }
 
