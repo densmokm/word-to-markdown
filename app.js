@@ -11,7 +11,6 @@ const wordCount = document.getElementById("wordCount");
 
 let selectedFile = null;
 let generatedMarkdown = "";
-let generatedHtml = "";
 
 function setStatus(message) {
   status.textContent = message;
@@ -54,15 +53,14 @@ convertButton.addEventListener("click", async () => {
     setStatus("Converting document locally in your browser...");
     const arrayBuffer = await selectedFile.arrayBuffer();
     const result = await mammoth.convertToHtml({ arrayBuffer });
-    generatedHtml = enhanceHtmlForConfluence(result.value);
-    generatedMarkdown = htmlToMarkdown(generatedHtml).trim() + "\n";
+    generatedMarkdown = htmlToMarkdown(result.value).trim() + "\n";
     markdownOutput.value = generatedMarkdown;
-    preview.innerHTML = generatedHtml || "Nothing to preview yet.";
+    preview.innerHTML = result.value || "Nothing to preview yet.";
     preview.classList.remove("empty");
     downloadButton.disabled = false;
     copyButton.disabled = false;
     wordCount.textContent = `${generatedMarkdown.length.toLocaleString()} characters`;
-    setStatus(result.messages.length ? `Converted with ${result.messages.length} note(s). Review complex merged cells.` : "Converted successfully. Use Copy output to paste rich text into Confluence.");
+    setStatus(result.messages.length ? `Converted with ${result.messages.length} note(s). Review complex merged cells.` : "Converted successfully. Your document never left this browser.");
   } catch (error) {
     console.error(error);
     setStatus("Conversion failed. Check that the file is a valid .docx document.");
@@ -92,29 +90,17 @@ downloadButton.addEventListener("click", () => {
 copyButton.addEventListener("click", async () => {
   if (!generatedMarkdown) return;
   try {
-    if (navigator.clipboard && window.ClipboardItem && generatedHtml) {
-      const htmlBlob = new Blob([generatedHtml], { type: "text/html" });
-      const textBlob = new Blob([generatedMarkdown], { type: "text/plain" });
-      await navigator.clipboard.write([new ClipboardItem({
-        "text/html": htmlBlob,
-        "text/plain": textBlob
-      })]);
-      setStatus("Rich text copied. Paste into Confluence to preserve tables and code blocks.");
-      return;
-    }
     await navigator.clipboard.writeText(generatedMarkdown);
-    setStatus("Markdown copied to your clipboard.");
   } catch {
     markdownOutput.select();
     document.execCommand("copy");
-    setStatus("Markdown copied to your clipboard.");
   }
+  setStatus("Markdown copied to your clipboard.");
 });
 
 clearButton.addEventListener("click", () => {
   selectedFile = null;
   generatedMarkdown = "";
-  generatedHtml = "";
   fileInput.value = "";
   markdownOutput.value = "";
   preview.textContent = "Nothing to preview yet.";
@@ -126,31 +112,6 @@ clearButton.addEventListener("click", () => {
   wordCount.textContent = "0 characters";
   setStatus("Choose a Word document to begin.");
 });
-
-function enhanceHtmlForConfluence(html) {
-  const documentFragment = new DOMParser().parseFromString(html, "text/html");
-  Array.from(documentFragment.body.querySelectorAll("p")).forEach(paragraph => {
-    const text = plainText(paragraph);
-    if (!looksLikeCode(text)) return;
-    const wrapper = documentFragment.createElement("div");
-    wrapper.setAttribute("data-code-language", "sql");
-    wrapper.className = "code-block sql-code-block";
-    const label = documentFragment.createElement("div");
-    label.className = "code-language-label";
-    label.textContent = "SQL";
-    const pre = documentFragment.createElement("pre");
-    pre.setAttribute("data-language", "sql");
-    const code = documentFragment.createElement("code");
-    code.className = "language-sql";
-    code.setAttribute("data-language", "sql");
-    code.textContent = formatSql(text);
-    pre.appendChild(code);
-    wrapper.appendChild(label);
-    wrapper.appendChild(pre);
-    paragraph.replaceWith(wrapper);
-  });
-  return documentFragment.body.innerHTML;
-}
 
 function htmlToMarkdown(html) {
   const documentFragment = new DOMParser().parseFromString(html, "text/html");
@@ -167,7 +128,7 @@ function convertNode(node, depth) {
   const content = () => Array.from(node.childNodes).map(child => convertNode(child, depth)).join("");
   if (/^h[1-6]$/.test(tag)) return `${"#".repeat(Number(tag[1]))} ${inlineContent(node)}`;
   if (tag === "p") return inlineContent(node);
-  if (tag === "pre") return fencedCodeBlock(node.textContent || "");
+  if (tag === "pre") return `\`\`\`\n${node.textContent || ""}\n\`\`\``;
   if (tag === "strong" || tag === "b") return `**${content()}**`;
   if (tag === "em" || tag === "i") return `*${content()}*`;
   if (tag === "u") return content();
@@ -178,10 +139,6 @@ function convertNode(node, depth) {
   if (tag === "table") return convertTable(node);
   if (tag === "img") return node.getAttribute("alt") ? `![${escapeMarkdown(node.getAttribute("alt"))}]()` : "![Image]()";
   if (tag === "blockquote") return content().split("\n").map(line => `> ${line}`).join("\n");
-  if (tag === "div" && node.matches(".code-block")) {
-    const pre = node.querySelector("pre");
-    return fencedCodeBlock(pre ? pre.textContent : node.textContent || "");
-  }
   return content();
 }
 
@@ -236,34 +193,8 @@ function inlineContent(node) {
     .trim();
 }
 
-function plainText(node) {
-  return (node.textContent || "").replace(/\u00a0/g, " ").trim();
-}
-
 function cleanText(value) {
   return value.replace(/\u00a0/g, " ").replace(/\s+/g, " ");
-}
-
-function looksLikeCode(value) {
-  const text = value.trim();
-  if (!text) return false;
-  const sqlKeywords = /\b(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|FROM|WHERE|JOIN|RETURNS|LANGUAGE|DECLARE|BEGIN|END|EXCEPTION|PERFORM|RAISE|COALESCE|TIMESTAMP|UUID|FUNCTION)\b/i;
-  const codeSignals = /(--|;|\$\$|:=|\bINTO\b|\bNULL\b|\bCOUNT\s*\()/i;
-  return text.length > 80 && sqlKeywords.test(text) && codeSignals.test(text);
-}
-
-function formatSql(value) {
-  return value
-    .replace(/\u00a0/g, " ")
-    .replace(/\s+/g, " ")
-    .replace(/\s+(--\s*)/g, "\n$1")
-    .replace(/;\s+/g, ";\n")
-    .replace(/\b(BEGIN|DECLARE|EXCEPTION|END;)\b/gi, "\n$1\n")
-    .trim();
-}
-
-function fencedCodeBlock(value) {
-  return `\`\`\`sql\n${value.trim()}\n\`\`\``;
 }
 
 function escapeMarkdown(value) {
